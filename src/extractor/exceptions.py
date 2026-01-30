@@ -1,4 +1,4 @@
-class YouTubeUrlError(ValueError):
+class UrlError(ValueError):
     """Raised when the provided URL is not a supported YouTube single-video URL."""
 
 

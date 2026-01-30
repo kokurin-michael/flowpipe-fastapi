@@ -1,7 +1,6 @@
 import subprocess
-import sys
 from pathlib import Path
-from src.downloader.exceptions import CookiesFileError
+from src.extractor.exceptions import CookiesFileError
 
 
 def is_valid_cookies_file(cookies_file_path: Path):
@@ -41,7 +40,3 @@ def get_cookies_from_chrome(cookies_file_path: Path):
     if result.returncode != 0:
         if "You must provide at least one URL" not in result.stderr:
             result.check_returncode()
-
-
-def upgrade_version():
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "-U", "yt-dlp"])
