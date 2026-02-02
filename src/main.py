@@ -2,7 +2,16 @@ from fastapi import FastAPI
 from uvicorn import run
 from src.downloader.router import router as downloader_router
 
-app = FastAPI()
+app = FastAPI(
+    title="FlowPipe API",
+    description="API для извлечения метаданных и стриминга видео с YouTube.",
+    openapi_tags=[
+        {
+            "name": "Загрузка (YouTube)",
+            "description": "Эндпоинты для получения информации о видео и скачивания/стриминга в выбранном формате.",
+        },
+    ],
+)
 app.include_router(downloader_router)
 
 if __name__ == '__main__':
