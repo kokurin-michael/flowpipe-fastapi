@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from uvicorn import run
-from src.extractor.router import router as downloader_router
+from src.downloader.router import router as downloader_router
 
 app = FastAPI()
 app.include_router(downloader_router)
