@@ -1,3 +1,5 @@
+import asyncio
+import uuid
 from typing import Optional
 
 from fastapi import Depends, HTTPException, Query
@@ -69,12 +71,12 @@ router = APIRouter(
     },
 )
 def extract_info_handler(
-    url: str = Query(
-        ...,
-        description="Ссылка на видео YouTube. Допустимые форматы: youtube.com/watch?v=ID, youtu.be/ID, youtube.com/shorts/ID.",
-        example="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-    ),
-    settings: Settings = Depends(get_settings),
+        url: str = Query(
+            ...,
+            description="Ссылка на видео YouTube. Допустимые форматы: youtube.com/watch?v=ID, youtu.be/ID, youtube.com/shorts/ID.",
+            example="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        ),
+        settings: Settings = Depends(get_settings),
 ) -> YtDlpInfoResponse:
     try:
         return extract_info(url, str(settings.cookie_file_path))
@@ -136,22 +138,22 @@ def extract_info_handler(
     },
 )
 def download_handler(
-    url: str = Query(
-        ...,
-        description="Ссылка на видео YouTube (те же форматы, что и в /extract_info).",
-        example="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-    ),
-    audio_format_id: Optional[str] = Query(
-        None,
-        description="Идентификатор аудио-формата из списка formats (например 140, 251). Опционально, если передан video_format_id.",
-        example="140",
-    ),
-    video_format_id: Optional[str] = Query(
-        None,
-        description="Идентификатор видео-формата из списка formats (например 22, 137, 160). Опционально, если передан audio_format_id.",
-        example="137",
-    ),
-    settings: Settings = Depends(get_settings),
+        url: str = Query(
+            ...,
+            description="Ссылка на видео YouTube (те же форматы, что и в /extract_info).",
+            example="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        ),
+        audio_format_id: Optional[str] = Query(
+            None,
+            description="Идентификатор аудио-формата из списка formats (например 140, 251). Опционально, если передан video_format_id.",
+            example="140",
+        ),
+        video_format_id: Optional[str] = Query(
+            None,
+            description="Идентификатор видео-формата из списка formats (например 22, 137, 160). Опционально, если передан audio_format_id.",
+            example="137",
+        ),
+        settings: Settings = Depends(get_settings),
 ):
     if not audio_format_id and not video_format_id:
         raise HTTPException(
@@ -199,19 +201,10 @@ def download_handler(
     if not fmt:
         raise HTTPException(status_code=404, detail=f"Формат '{fmt_id}' не найден.")
 
-    ext = fmt.ext or "bin"
-    format_note = fmt.format_note or fmt_id
-    filename = f"{info.id}_{format_note}.{ext}"
-
     try:
-        stream = download(url, str(settings.cookie_file_path), format_selector)
+        download_id = uuid.uuid4().hex
+        asyncio.create_task(
+            download(url, str(settings.cookie_file_path), format_selector, str(settings.download_dir_path)))
+        return download_id
     except Exception:
         raise HTTPException(status_code=500, detail="Ошибка при скачивании видео.")
-
-    return StreamingResponse(
-        stream,
-        media_type="application/octet-stream",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-        },
-    )

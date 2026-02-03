@@ -39,49 +39,49 @@ def extract_info(url: str, cookies_file_path: str):
         return YtDlpInfoResponse.model_validate(yt.extract_info(url=url, download=False))
 
 
-# def download(
-#         url: str,
-#         cookies_file_path: str,
-#         format_id: str,
-#         download_dir: str,
-# ):
-#     validate_supported_url(url)
-#     validate_cookies_file(Path(cookies_file_path))
-#
-#     opt = {
-#         "format": format_id,
-#         'cookiefile': cookies_file_path,
-#         "outtmpl": f'{download_dir}/%(id)s/%(format_note)s.%(ext)s'
-#     }
-#
-#     with YoutubeDL(opt) as yt:
-#         yt.download(url)
-
 def download(
         url: str,
         cookies_file_path: str,
         format_selector: str,
-        chunk_size: int = 512 * 1024
+        download_dir: str,
 ):
     validate_supported_url(url)
     validate_cookies_file(Path(cookies_file_path))
 
-    cmd = [
-        "yt-dlp", "-f", format_selector,
-        "--cookies", cookies_file_path,
-        "-o", "-", "--no-part", "--quiet",
-        url,
-    ]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=chunk_size)
+    opt = {
+        "format": format_selector,
+        'cookiefile': cookies_file_path,
+        "outtmpl": f'{download_dir}/%(id)s/%(format_note)s.%(ext)s'
+    }
 
-    try:
-        while True:
-            chunk = proc.stdout.read(chunk_size)
-            if not chunk:
-                break
-            yield chunk
-    finally:
-        proc.wait()
+    with YoutubeDL(opt) as yt:
+        yt.download(url)
+
+# def download(
+#         url: str,
+#         cookies_file_path: str,
+#         format_selector: str,
+#         chunk_size: int = 512 * 1024
+# ):
+#     validate_supported_url(url)
+#     validate_cookies_file(Path(cookies_file_path))
+#
+#     cmd = [
+#         "yt-dlp", "-f", format_selector,
+#         "--cookies", cookies_file_path,
+#         "-o", "-", "--no-part", "--quiet",
+#         url,
+#     ]
+#     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=chunk_size)
+#
+#     try:
+#         while True:
+#             chunk = proc.stdout.read(chunk_size)
+#             if not chunk:
+#                 break
+#             yield chunk
+#     finally:
+#         proc.wait()
 
 
 def get_cookies_from_chrome(cookies_file_path: Path):
