@@ -1,7 +1,53 @@
-from typing import Any, Optional
+from typing import Any, Optional, Callable
 from pydantic import BaseModel, Field, model_validator
 from enum import StrEnum
 from typing import Union
+
+
+class DownloadStatusEnum(StrEnum):
+    """Статус загрузки: ожидание, в процессе, готово, ошибка."""
+
+    PENDING = "pending"
+    DOWNLOADING = "downloading"
+    READY = "ready"
+    FAILURE = "failure"
+
+
+class DownloadStatusResponse(BaseModel):
+    """Прогресс и статус загрузки (без file_path) для GET и SSE эндпоинтов."""
+
+    progress: float = Field(
+        ...,
+        ge=0,
+        le=100,
+        description="Прогресс загрузки в процентах (0–100). До начала загрузки 0, по завершении 100.",
+    )
+    status: DownloadStatusEnum = Field(
+        ...,
+        description="Статус: pending — задача создана; downloading — идёт скачивание; ready — загрузка завершена; failure — ошибка.",
+    )
+
+
+class DownloadProgressUpdate(BaseModel):
+    """Одно обновление прогресса загрузки для progress_callback."""
+
+    status: DownloadStatusEnum = Field(
+        ...,
+        description="Текущий статус: pending, downloading, ready, failure.",
+    )
+    progress: float = Field(
+        ...,
+        ge=0.0,
+        le=100.0,
+        description="Прогресс в процентах (0–100).",
+    )
+    file_path: str | None = Field(
+        default=None,
+        description="Путь к файлу после успешной загрузки (заполняется при status=ready).",
+    )
+
+
+ProgressCallback = Callable[[DownloadProgressUpdate], None]
 
 
 class ProtocolEnum(StrEnum):

@@ -19,6 +19,11 @@ def test_download():
     download(url, cookie_file, format_id, download_dir)
 
 
+def test_upgrade_version():
+    upgrade_version()
+
+
 if __name__ == '__main__':
     # test_extract_info()
-    test_download()
+    # test_download()
+    test_upgrade_version()

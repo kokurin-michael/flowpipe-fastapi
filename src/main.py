@@ -1,13 +1,25 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from uvicorn import run
+
+from src.database import init_db
 from src.downloader.router import router as downloader_router
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
+
 
 app = FastAPI(
     title="FlowPipe API",
     description="API для извлечения метаданных и стриминга видео с YouTube.",
+    lifespan=lifespan,
     openapi_tags=[
         {
-            "name": "Загрузка (YouTube)",
+            "name": "Загрузка",
             "description": "Эндпоинты для получения информации о видео и скачивания/стриминга в выбранном формате.",
         },
     ],

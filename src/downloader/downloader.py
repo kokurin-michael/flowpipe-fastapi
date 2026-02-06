@@ -1,10 +1,13 @@
 import re
 import subprocess
 import sys
+from typing import Callable, Optional
 
 from yt_dlp import YoutubeDL
 from pathlib import Path
-from src.downloader.models import YtDlpInfoResponse
+
+from src.downloader.models import YtDlpInfoResponse, DownloadStatusEnum, DownloadStatusResponse, ProgressCallback, \
+    DownloadProgressUpdate
 
 _YT_VIDEO_RE = re.compile(
     r'^https?://(?:www\.)?'
@@ -44,44 +47,57 @@ def download(
         cookies_file_path: str,
         format_selector: str,
         download_dir: str,
+        progress_callback: ProgressCallback
 ):
+    """
+    Скачивает видео в download_dir.
+    Либо обновляет progress_state (dict), либо запись в БД по download_id (если передан db_engine и download_id).
+    При успехе в БД пишется expected_file_path; при ошибке — status FAILURE.
+    """
     validate_supported_url(url)
     validate_cookies_file(Path(cookies_file_path))
 
+    def progress_hook(info: dict):
+        """Обновляет progress_state по данным из yt-dlp progress_hook."""
+        status = info.get("status")
+        filename = info.get("filename") if info.get("filename") is not None else info.get("tmpfilename")
+
+        if status == "downloading":
+            total = info.get("total_bytes") or info.get("total_bytes_estimate")
+            downloaded = info.get("downloaded_bytes")
+            if total and downloaded is not None and total > 0:
+                progress_callback(DownloadProgressUpdate(status=DownloadStatusEnum.DOWNLOADING,
+                                                         progress=min(100.0, round(100.0 * downloaded / total, 1)),
+                                                         file_path=filename))
+            elif "_percent_str" in info and info["_percent_str"]:
+                try:
+                    progress_callback(DownloadProgressUpdate(status=DownloadStatusEnum.DOWNLOADING,
+                                                             progress=float(info["_percent_str"].rstrip("%")),
+                                                             file_path=filename))
+                except (ValueError, TypeError):
+                    pass
+        elif status == "finished":
+            filename = re.sub(r"(\.[\w-]+)+(?=\.\w+$)", "", filename)
+            progress_callback(
+                DownloadProgressUpdate(status=DownloadStatusEnum.READY, progress=100.0, file_path=filename))
+
     opt = {
         "format": format_selector,
-        'cookiefile': cookies_file_path,
-        "outtmpl": f'{download_dir}/%(id)s/%(format_note)s.%(ext)s'
+        "cookiefile": cookies_file_path,
+        "outtmpl": {
+            "default": f"{download_dir}/%(id)s/{format_selector}.%(ext)s"
+        },
+        "progress_hooks": [progress_hook],
+        "remote_components": ["ejs:github"],
     }
 
-    with YoutubeDL(opt) as yt:
-        yt.download(url)
+    try:
+        progress_callback(DownloadProgressUpdate(status=DownloadStatusEnum.PENDING, progress=0.0))
 
-# def download(
-#         url: str,
-#         cookies_file_path: str,
-#         format_selector: str,
-#         chunk_size: int = 512 * 1024
-# ):
-#     validate_supported_url(url)
-#     validate_cookies_file(Path(cookies_file_path))
-#
-#     cmd = [
-#         "yt-dlp", "-f", format_selector,
-#         "--cookies", cookies_file_path,
-#         "-o", "-", "--no-part", "--quiet",
-#         url,
-#     ]
-#     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=chunk_size)
-#
-#     try:
-#         while True:
-#             chunk = proc.stdout.read(chunk_size)
-#             if not chunk:
-#                 break
-#             yield chunk
-#     finally:
-#         proc.wait()
+        with YoutubeDL(opt) as yt:
+            yt.download(url)
+    except Exception:
+        progress_callback(DownloadProgressUpdate(status=DownloadStatusEnum.FAILURE, progress=0.0))
 
 
 def get_cookies_from_chrome(cookies_file_path: Path):
@@ -154,6 +170,95 @@ def upgrade_version():
 
     if current != latest:
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-U", "yt-dlp"])
+
+# def _progress_hook(progress_state: dict, info: dict) -> None:
+#     """Обновляет progress_state по данным из yt-dlp progress_hook."""
+#     status = info.get("status")
+#     if status == "downloading":
+#         progress_state["status"] = DownloadStatusEnum.DOWNLOADING
+#         total = info.get("total_bytes") or info.get("total_bytes_estimate")
+#         downloaded = info.get("downloaded_bytes")
+#         if total and downloaded is not None and total > 0:
+#             progress_state["progress"] = min(100.0, round(100.0 * downloaded / total, 1))
+#         elif "_percent_str" in info and info["_percent_str"]:
+#             try:
+#                 progress_state["progress"] = float(info["_percent_str"].rstrip("%"))
+#             except (ValueError, TypeError):
+#                 pass
+#     elif status == "finished":
+#         progress_state["status"] = DownloadStatusEnum.READY
+#         progress_state["progress"] = 100.0
+
+
+# def _update_db(
+#         db_engine: Any,
+#         download_id: str,
+#         progress: float,
+#         status: str,
+#         file_path: str | None = None,
+# ) -> None:
+#     """Обновляет запись DownloadTask в БД (вызывается из потока загрузки)."""
+#     session = Session(bind=db_engine)
+#     try:
+#         task = session.get(DownloadTask, download_id)
+#         if task:
+#             task.progress = progress
+#             task.status = status
+#             if file_path is not None:
+#                 task.file_path = file_path
+#             session.commit()
+#     finally:
+#         session.close()
+#
+#
+# def _progress_hook_db(
+#         info: dict,
+#         update_fn: Any,
+#         expected_file_path: str | None,
+# ) -> None:
+#     """Progress hook: извлекает прогресс из info и вызывает update_fn(progress, status, file_path)."""
+#     status = info.get("status")
+#     if status == "downloading":
+#         progress = 0.0
+#         total = info.get("total_bytes") or info.get("total_bytes_estimate")
+#         downloaded = info.get("downloaded_bytes")
+#         if total and downloaded is not None and total > 0:
+#             progress = min(100.0, round(100.0 * downloaded / total, 1))
+#         elif "_percent_str" in info and info["_percent_str"]:
+#             try:
+#                 progress = float(info["_percent_str"].rstrip("%"))
+#             except (ValueError, TypeError):
+#                 pass
+#         update_fn(progress, DownloadStatusEnum.DOWNLOADING, None)
+#     elif status == "finished":
+#         update_fn(100.0, DownloadStatusEnum.READY, expected_file_path)
+
+
+# def download(
+#         url: str,
+#         cookies_file_path: str,
+#         format_selector: str,
+#         chunk_size: int = 512 * 1024
+# ):
+#     validate_supported_url(url)
+#     validate_cookies_file(Path(cookies_file_path))
+#
+#     cmd = [
+#         "yt-dlp", "-f", format_selector,
+#         "--cookies", cookies_file_path,
+#         "-o", "-", "--no-part", "--quiet",
+#         url,
+#     ]
+#     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=chunk_size)
+#
+#     try:
+#         while True:
+#             chunk = proc.stdout.read(chunk_size)
+#             if not chunk:
+#                 break
+#             yield chunk
+#     finally:
+#         proc.wait()
 
 # def extract_video_id(url: str) -> str:
 #     """Достаёт 11-символьный id видео из валидного YouTube URL."""
