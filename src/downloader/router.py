@@ -1,3 +1,4 @@
+import json
 import mimetypes
 import threading
 import uuid
@@ -311,46 +312,139 @@ def download_status_handler(
     )
 
 
-@router.get("/download/file/{download_id}")
-def get_download_by_id(download_id: str, request: Request, session: Session = Depends(get_session)):
+@router.get(
+    "/download/file/{download_id}",
+    summary="Скачать файл по идентификатору загрузки (с поддержкой паузы и возобновления)",
+    description="""
+Возвращает файл по идентификатору задачи загрузки (`download_id`). Файл доступен только после завершения загрузки (статус `ready`).
+
+**Поддержка паузы и возобновления:** эндпоинт поддерживает HTTP Range-запросы (RFC 7233). Клиент может передавать заголовок `Range: bytes=start-end` и получать ответ `206 Partial Content` с запрошенным диапазоном байт. Это позволяет:
+- приостанавливать и возобновлять загрузку;
+- перематывать воспроизведение в плеере без докачки с начала.
+
+Без заголовка `Range` возвращается весь файл (статус 200). В ответе всегда присутствует заголовок `Accept-Ranges: bytes`.
+
+**Использование:** убедитесь, что загрузка завершена (GET `/download/status/{download_id}` → `status: ready`), затем запрашивайте GET `/download/file/{download_id}`. Для возобновления передайте, например, `Range: bytes=1024-`.
+    """,
+    responses={
+        200: {
+            "description": "Успешно. Возвращается весь файл (тело — бинарный поток).",
+        },
+        206: {
+            "description": "Частичное содержимое. Запрос с заголовком Range выполнен успешно, в теле — запрошенный диапазон байт.",
+        },
+        404: {
+            "description": "Файл не найден: загрузка с указанным download_id отсутствует, ещё не завершена (не ready), либо файл на диске удалён.",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "default": {"value": {"detail": "Файл не найден или ещё не готов."}},
+                        "not_on_disk": {"value": {"detail": "Файл на диске не найден."}},
+                    }
+                }
+            },
+        },
+        416: {
+            "description": "Диапазон не выполним. Заголовок Range задан некорректно (например, start больше размера файла).",
+            "content": {
+                "application/json": {
+                    "examples": {"default": {"value": {"detail": "Запрошенный диапазон байт не выполним."}}}
+                }
+            },
+        },
+        500: {
+            "description": "Внутренняя ошибка при чтении файла или разборе Range.",
+            "content": {
+                "application/json": {
+                    "examples": {"default": {"value": {"detail": "Ошибка при отдаче файла."}}}
+                }
+            },
+        },
+    },
+)
+def get_download_by_id(
+    download_id: str,
+    request: Request,
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+):
+    """
+    Отдаёт файл по download_id с поддержкой Range (пауза/возобновление).
+    """
+    # Проверка существования записи и готовности файла
     yt_dlp_file = session.get(YtDlpFile, download_id)
     file_path = yt_dlp_file.file_path if yt_dlp_file else None
     if yt_dlp_file is None or yt_dlp_file.status != "ready" or not file_path:
-        raise HTTPException(404, "Файл не найден или ещё не готов.")
-    path = Path(file_path)
-    if not path.is_file():
-        raise HTTPException(404, "Файл на диске не найден.")
-    # Проверка, что path внутри download_dir (безопасность)
-    size = path.stat().st_size
-    range_header = request.headers.get("range")
+        raise HTTPException(status_code=404, detail="Файл не найден или ещё не готов.")
 
+    try:
+        path = Path(file_path)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Ошибка при отдаче файла.")
+
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Файл на диске не найден.")
+
+    # Безопасность: файл должен находиться внутри директории загрузок
+    try:
+        path.resolve().relative_to(settings.download_dir_path.resolve())
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Файл не найден или ещё не готов.")
+
+    try:
+        size = path.stat().st_size
+    except OSError:
+        raise HTTPException(status_code=500, detail="Ошибка при отдаче файла.")
+
+    # Определяем MIME-тип по расширению
     media_type, _ = mimetypes.guess_type(path.name)
     if not media_type:
         media_type = "application/octet-stream"
 
+    range_header = request.headers.get("range")
+
+    # Запрос без Range — отдаём весь файл (200)
     if not range_header or not range_header.startswith("bytes="):
-        # Отдать весь файл (200)
         return FileResponse(path, media_type=media_type, filename=path.name)
-    # Парсинг "bytes=start-end" или "bytes=start-"
-    parts = range_header.replace("bytes=", "").split("-")
-    start = int(parts[0]) if parts[0] else 0
-    end = int(parts[1]) if len(parts) > 1 and parts[1] else size - 1
+
+    # Парсинг Range: "bytes=start-end" или "bytes=start-"
+    try:
+        parts = range_header.replace("bytes=", "").strip().split("-")
+        start = int(parts[0]) if parts[0] else 0
+        end = int(parts[1]) if len(parts) > 1 and parts[1] else size - 1
+    except (ValueError, IndexError):
+        return Response(
+            status_code=416,
+            content=json.dumps({"detail": "Запрошенный диапазон байт не выполним."}),
+            media_type="application/json",
+            headers={"Content-Range": f"bytes */{size}"},
+        )
     end = min(end, size - 1)
     if start > end or start < 0:
-        return Response(status_code=416, headers={"Content-Range": f"bytes */{size}"})  # Range Not Satisfiable
+        return Response(
+            status_code=416,
+            content=json.dumps({"detail": "Запрошенный диапазон байт не выполним."}),
+            media_type="application/json",
+            headers={"Content-Range": f"bytes */{size}"},
+        )
 
+    # Генератор: читаем и отдаём только запрошенный диапазон байт
     def iterfile():
-        with open(path, "rb") as f:
-            f.seek(start)
-            remaining = end - start + 1
-            chunk_size = 64 * 1024
-            while remaining > 0:
-                read = min(chunk_size, remaining)
-                data = f.read(read)
-                if not data:
-                    break
-                remaining -= len(data)
-                yield data
+        try:
+            with open(path, "rb") as f:
+                f.seek(start)
+                remaining = end - start + 1
+                chunk_size = 64 * 1024
+                while remaining > 0:
+                    read_size = min(chunk_size, remaining)
+                    data = f.read(read_size)
+                    if not data:
+                        break
+                    remaining -= len(data)
+                    yield data
+        except OSError:
+            # При ошибке чтения во время стрима цикл прерывается — клиент может получить неполные данные
+            return
 
     return StreamingResponse(
         iterfile(),
