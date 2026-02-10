@@ -1,7 +1,6 @@
 import re
 import subprocess
 import sys
-from typing import Callable, Optional
 
 from yt_dlp import YoutubeDL
 from pathlib import Path
@@ -30,6 +29,10 @@ def validate_supported_url(url: str):
         )
 
 
+def generate_outtmpl(download_dir: str, id_dir: str, format_selector: str, ext: str) -> str:
+    return f"{download_dir}/{id_dir}/{format_selector}.{ext}"
+
+
 def extract_info(url: str, cookies_file_path: str):
     validate_supported_url(url)
     validate_cookies_file(Path(cookies_file_path))
@@ -46,11 +49,11 @@ def download(
         url: str,
         cookies_file_path: str,
         format_selector: str,
-        download_dir: str,
+        outtmpl: str,
         progress_callback: ProgressCallback
 ):
     """
-    Скачивает видео в download_dir.
+    Скачивает видео в outtmpl.
     Либо обновляет progress_state (dict), либо запись в БД по download_id (если передан db_engine и download_id).
     При успехе в БД пишется expected_file_path; при ошибке — status FAILURE.
     """
@@ -60,33 +63,27 @@ def download(
     def progress_hook(info: dict):
         """Обновляет progress_state по данным из yt-dlp progress_hook."""
         status = info.get("status")
-        filename = info.get("filename") if info.get("filename") is not None else info.get("tmpfilename")
 
         if status == "downloading":
             total = info.get("total_bytes") or info.get("total_bytes_estimate")
             downloaded = info.get("downloaded_bytes")
             if total and downloaded is not None and total > 0:
                 progress_callback(DownloadProgressUpdate(status=DownloadStatusEnum.DOWNLOADING,
-                                                         progress=min(100.0, round(100.0 * downloaded / total, 1)),
-                                                         file_path=filename))
+                                                         progress=min(100.0, round(100.0 * downloaded / total, 1))))
             elif "_percent_str" in info and info["_percent_str"]:
                 try:
                     progress_callback(DownloadProgressUpdate(status=DownloadStatusEnum.DOWNLOADING,
-                                                             progress=float(info["_percent_str"].rstrip("%")),
-                                                             file_path=filename))
+                                                             progress=float(info["_percent_str"].rstrip("%"))))
                 except (ValueError, TypeError):
                     pass
         elif status == "finished":
-            filename = re.sub(r"(\.[\w-]+)+(?=\.\w+$)", "", filename)
             progress_callback(
-                DownloadProgressUpdate(status=DownloadStatusEnum.READY, progress=100.0, file_path=filename))
+                DownloadProgressUpdate(status=DownloadStatusEnum.READY, progress=100.0))
 
     opt = {
         "format": format_selector,
         "cookiefile": cookies_file_path,
-        "outtmpl": {
-            "default": f"{download_dir}/%(id)s/{format_selector}.%(ext)s"
-        },
+        "outtmpl": outtmpl,
         "progress_hooks": [progress_hook],
         "remote_components": ["ejs:github"],
     }

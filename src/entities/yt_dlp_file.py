@@ -34,7 +34,7 @@ class YtDlpFile(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True, index=True, comment="UUID задачи в hex")
     progress: Mapped[float] = mapped_column(Float, default=0.0, nullable=False, comment="Прогресс загрузки 0–100%")
     status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False, comment="pending | downloading | ready | failure")
-    file_path: Mapped[str | None] = mapped_column(String(1024), nullable=True, comment="Путь к файлу после загрузки")
+    outtmpl: Mapped[str | None] = mapped_column(String(1024), nullable=True, comment="Путь к файлу после загрузки")
     description: Mapped[str | None] = mapped_column(Text, nullable=True, comment="Описание видео из extract_info")
     extension: Mapped[str | None] = mapped_column(String(32), nullable=True, comment="Расширение/контейнер: mp4, webm, m4a и т.д.")
     thumbnails: Mapped[list | None] = mapped_column(JSON, nullable=True, comment="Список превью: [{url, width?, height?}, ...]")

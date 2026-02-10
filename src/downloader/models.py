@@ -41,10 +41,6 @@ class DownloadProgressUpdate(BaseModel):
         le=100.0,
         description="Прогресс в процентах (0–100).",
     )
-    file_path: str | None = Field(
-        default=None,
-        description="Путь к файлу после успешной загрузки (заполняется при status=ready).",
-    )
 
 
 ProgressCallback = Callable[[DownloadProgressUpdate], None]

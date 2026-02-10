@@ -13,7 +13,7 @@ from starlette.responses import StreamingResponse, FileResponse, Response
 
 from src.config import Settings, get_settings
 from src.database import get_session, SessionLocal
-from src.downloader.downloader import download, extract_info
+from src.downloader.downloader import download, extract_info, generate_outtmpl
 from src.downloader.models import YtDlpInfoResponse, DownloadStatusEnum, DownloadStatusResponse, DownloadProgressUpdate
 from src.entities import YtDlpFile
 
@@ -223,12 +223,13 @@ def download_handler(
     download_id = uuid.uuid4().hex
     download_dir = settings.download_dir_path
     ext = fmt.ext
+    outtmpl = generate_outtmpl(download_dir=str(download_dir), id_dir=info.id, format_selector=format_selector, ext=ext)
 
     yt_dlp_file = YtDlpFile(
         id=download_id,
         progress=0.0,
         status=DownloadStatusEnum.PENDING,
-        file_path=None,
+        file_path=outtmpl,
         description=info.description,
         extension=ext,
         thumbnails=[t.model_dump() for t in (info.thumbnails or [])],
@@ -243,8 +244,6 @@ def download_handler(
             if row is not None:
                 row.status = update.status
                 row.progress = update.progress
-                if update.file_path is not None:
-                    row.file_path = update.file_path
                 progress_callback_session.commit()
         finally:
             progress_callback_session.close()
@@ -256,7 +255,7 @@ def download_handler(
                 "url": url,
                 "cookies_file_path": str(settings.cookie_file_path),
                 "format_selector": format_selector,
-                "download_dir": str(download_dir),
+                "outtmpl": outtmpl,
                 "progress_callback": progress_callback
             },
             daemon=True,
@@ -363,22 +362,22 @@ def download_status_handler(
     },
 )
 def get_download_by_id(
-    download_id: str,
-    request: Request,
-    session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
+        download_id: str,
+        request: Request,
+        session: Session = Depends(get_session),
+        settings: Settings = Depends(get_settings),
 ):
     """
     Отдаёт файл по download_id с поддержкой Range (пауза/возобновление).
     """
     # Проверка существования записи и готовности файла
     yt_dlp_file = session.get(YtDlpFile, download_id)
-    file_path = yt_dlp_file.file_path if yt_dlp_file else None
-    if yt_dlp_file is None or yt_dlp_file.status != "ready" or not file_path:
+    outtmpl = yt_dlp_file.outtmpl if yt_dlp_file else None
+    if yt_dlp_file is None or yt_dlp_file.status != "ready" or not outtmpl:
         raise HTTPException(status_code=404, detail="Файл не найден или ещё не готов.")
 
     try:
-        path = Path(file_path)
+        path = Path(outtmpl)
     except Exception:
         raise HTTPException(status_code=500, detail="Ошибка при отдаче файла.")
 
