@@ -1,7 +1,6 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from uvicorn import run
 
 from src.database import init_db
 from src.downloader.router import router as downloader_router
@@ -19,12 +18,9 @@ app = FastAPI(
     lifespan=lifespan,
     openapi_tags=[
         {
-            "name": "Загрузка",
+            "name": "Download",
             "description": "Эндпоинты для получения информации о видео и скачивания/стриминга в выбранном формате.",
         },
     ],
 )
 app.include_router(downloader_router)
-
-if __name__ == '__main__':
-    run("src.main:app", host="0.0.0.0", port=8000, reload=True)

@@ -18,13 +18,14 @@ from src.downloader.models import YtDlpInfoResponse, DownloadStatusEnum, Downloa
 from src.entities import YtDlpFile
 
 router = APIRouter(
-    tags=["Загрузка"],
+    tags=["Download"],
     prefix="",
 )
 
 
 @router.get(
     "/extract_info",
+    operation_id="getExtractInfo",
     response_model=YtDlpInfoResponse,
     summary="Получить метаданные и список форматов видео",
     description="""
@@ -109,6 +110,7 @@ def extract_info_handler(
 
 @router.get(
     "/download",
+    operation_id="startDownload",
     summary="Запустить загрузку видео/аудио на сервер",
     description="""
 Запускает фоновую загрузку выбранного формата (или комбинации видео+аудио) в папку на сервере (см. настройку download_dir). Возвращает идентификатор задачи для опроса прогресса через GET `/download/status/{download_id}`.
@@ -272,6 +274,7 @@ def download_handler(
 
 @router.get(
     "/download/status/{download_id}",
+    operation_id="getDownloadStatus",
     response_model=DownloadStatusResponse,
     summary="Получить прогресс и статус загрузки",
     description="""
@@ -313,6 +316,7 @@ def download_status_handler(
 
 @router.get(
     "/download/file/{download_id}",
+    operation_id="getDownloadFile",
     summary="Скачать файл по идентификатору загрузки (с поддержкой паузы и возобновления)",
     description="""
 Возвращает файл по идентификатору задачи загрузки (`download_id`). Файл доступен только после завершения загрузки (статус `ready`).
