@@ -1,13 +1,13 @@
 from contextlib import asynccontextmanager
-
 from fastapi import FastAPI
-
+from src.converter.converter import check_ffmpeg
 from src.database import init_db
 from src.downloader.router import router as downloader_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    check_ffmpeg()
     init_db()
     yield
 

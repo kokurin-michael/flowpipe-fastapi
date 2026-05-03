@@ -231,7 +231,7 @@ def download_handler(
         id=download_id,
         progress=0.0,
         status=DownloadStatusEnum.PENDING,
-        file_path=outtmpl,
+        outtmpl=outtmpl,
         description=info.description,
         extension=ext,
         thumbnails=[t.model_dump() for t in (info.thumbnails or [])],
